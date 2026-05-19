@@ -337,26 +337,69 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     showLoader();
-    try {
-      const response = await fetch(API_URL, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify(payload),
-      });
-      const result = await response.json();
+    const MAX_RETRY = 3;
+    let attempt = 0;
+    let lastError = "";
 
-      if (result.status === "success") {
-        showMessage(result.message, true);
-        resetForm();
-      } else {
-        showMessage(result.message, false, true);
+    while (attempt < MAX_RETRY) {
+      attempt++;
+      try {
+        const response = await fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify(payload),
+        });
+        const result = await response.json();
+
+        if (result.status === "success") {
+          // Verifikasi: pastikan data benar-benar tersimpan di sheet
+          const verify = await fetch(
+            `${API_URL}?action=search&sheetName=${encodeURIComponent(sheet)}&id=${encodeURIComponent(id)}`,
+          );
+          const verifyResult = await verify.json();
+
+          if (verifyResult.status === "success" && verifyResult.data) {
+            // Data confirmed tersimpan
+            showMessage(`Data berhasil disimpan dan terverifikasi!`, true);
+            hideLoader();
+            resetForm();
+            return;
+          } else {
+            // GAS bilang sukses tapi data tidak ada — retry
+            lastError = "Verifikasi gagal, mencoba ulang...";
+            showMessage(
+              `Percobaan ${attempt}/${MAX_RETRY}: ${lastError}`,
+              false,
+            );
+            await new Promise((r) => setTimeout(r, 1500)); // tunggu 1.5 detik sebelum retry
+            continue;
+          }
+        } else {
+          lastError = result.message;
+          showMessage(
+            `Percobaan ${attempt}/${MAX_RETRY} gagal: ${lastError}`,
+            false,
+          );
+          await new Promise((r) => setTimeout(r, 1500));
+        }
+      } catch (error) {
+        lastError = "Koneksi gagal";
+        console.error(`Attempt ${attempt}:`, error);
+        showMessage(
+          `Percobaan ${attempt}/${MAX_RETRY}: koneksi gagal`,
+          false,
+        );
+        await new Promise((r) => setTimeout(r, 2000));
       }
-    } catch (error) {
-      console.error(error);
-      showMessage("Gagal menyimpan data.", false, true);
-    } finally {
-      hideLoader();
     }
+
+    // Semua retry habis
+    hideLoader();
+    showMessage(
+      `Gagal menyimpan setelah ${MAX_RETRY} percobaan. Coba lagi manual.`,
+      false,
+      true,
+    );
   });
 
   // Generate Message
